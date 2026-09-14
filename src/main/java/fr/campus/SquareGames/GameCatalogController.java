@@ -15,10 +15,6 @@ public class GameCatalogController {
         this.gamePlugins = gamePlugins;
     }
 
-    /**
-     * Catalogue des jeux disponibles. Le libellé de chaque jeu est traduit dans la langue
-     * demandée par l'en-tête HTTP {@code Accept-Language} (résolue par Spring dans {@code locale}).
-     */
     @GetMapping("/games")
     public List<GameInfo> getGames(Locale locale) {
         return gamePlugins.stream()
