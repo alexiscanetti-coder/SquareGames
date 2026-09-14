@@ -9,7 +9,6 @@ import org.springframework.stereotype.Service;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -17,12 +16,11 @@ import java.util.stream.Stream;
 public class GameServiceImpl implements GameService {
 
     private final Map<String, GamePlugin> gamePlugins;
+    private final GameDao gameDao;
 
-    private final Map<UUID, Game> games = new ConcurrentHashMap<>();
-
-    public GameServiceImpl(List<GamePlugin> gamePlugins) {
-        this.gamePlugins = gamePlugins.stream()
-                .collect(Collectors.toUnmodifiableMap(GamePlugin::getGameFactoryId, plugin -> plugin));
+    public GameServiceImpl(List<GamePlugin> gamePlugins, GameDao gameDao) {
+        this.gamePlugins = gamePlugins.stream().collect(Collectors.toUnmodifiableMap(GamePlugin::getGameFactoryId, plugin -> plugin));
+        this.gameDao = gameDao;
     }
 
     @Override
@@ -34,7 +32,7 @@ public class GameServiceImpl implements GameService {
         }
         try {
             Game game = plugin.createGame(params);
-            games.put(game.getId(), game);
+            gameDao.save(game);
             return game;
         } catch (IllegalArgumentException e) {
             throw new InvalidGameOperationException(e.getMessage());
@@ -43,13 +41,8 @@ public class GameServiceImpl implements GameService {
 
     @Override
     public Game getGame(UUID gameId) {
-        Game game = games.get(gameId);
-        if (game == null) {
-            throw new GameNotFoundException(gameId);
-        }
-        return game;
+        return gameDao.findById(gameId).orElseThrow(() -> new GameNotFoundException(gameId));
     }
-
     @Override
     public Game move(UUID gameId, CellPosition target) {
         Game game = getGame(gameId);
@@ -60,6 +53,7 @@ public class GameServiceImpl implements GameService {
                         "Aucun jeton ne peut aller en (" + target.x() + ", " + target.y() + ")"));
         try {
             token.moveTo(target);
+            gameDao.save(game);
         } catch (InvalidPositionException e) {
             throw new InvalidGameOperationException(e.getMessage());
         }
