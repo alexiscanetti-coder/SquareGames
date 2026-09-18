@@ -7,4 +7,5 @@ import java.util.*;
 public interface GameDao {
     void save(Game game);
     Optional<Game> findById(UUID gameId);
+    List<Game> findByPlayerId(UUID playerId);
 }

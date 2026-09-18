@@ -7,8 +7,10 @@ import fr.le_campus_numerique.square_games.engine.TokenPosition;
 import org.springframework.context.MessageSource;
 
 import java.util.Collection;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -43,10 +45,19 @@ public abstract class AbstractGamePlugin implements GamePlugin {
     }
 
     @Override
-    public Game createGame(GameCreationParams params) {
-        int playerCount = params.playerCount() != null ? params.playerCount() : defaultPlayerCount;
+    public Game createGame(GameCreationParams params, UUID creatorId) {
         int boardSize = params.boardSize() != null ? params.boardSize() : defaultBoardSize;
-        return factory.createGame(playerCount, boardSize);
+        Set<UUID> playerIds = new LinkedHashSet<>();
+        playerIds.add(creatorId);
+        if (params.opponentIds() != null) {
+            playerIds.addAll(params.opponentIds());
+        } else {
+            int playerCount = params.playerCount() != null ? params.playerCount() : defaultPlayerCount;
+            while (playerIds.size() < playerCount) {
+                playerIds.add(UUID.randomUUID());
+            }
+        }
+        return factory.createGame(boardSize, playerIds);
     }
 
     @Override
