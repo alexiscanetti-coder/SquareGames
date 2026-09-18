@@ -1,4 +1,4 @@
-package fr.campus.SquareGames;
+package fr.campus.SquareGames.game;
 
 import java.util.Set;
 import java.util.UUID;

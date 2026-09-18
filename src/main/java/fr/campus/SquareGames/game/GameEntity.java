@@ -1,4 +1,4 @@
-package fr.campus.SquareGames;
+package fr.campus.SquareGames.game;
 
 import jakarta.persistence.CascadeType;
 import jakarta.persistence.Entity;

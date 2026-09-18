@@ -1,5 +1,6 @@
-package fr.campus.SquareGames;
+package fr.campus.SquareGames.catalog;
 
+import fr.campus.SquareGames.game.GamePlugin;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.web.bind.annotation.GetMapping;

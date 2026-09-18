@@ -1,4 +1,4 @@
-package fr.campus.SquareGames;
+package fr.campus.SquareGames.heartbeat;
 import org.springframework.stereotype.Service;
 import java.util.concurrent.ThreadLocalRandom;
 
