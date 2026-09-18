@@ -46,13 +46,17 @@ Engine model (all game logic lives here, not in this repo):
 
 ## Architecture
 
-Single Spring Boot module, one package `fr.campus.SquareGames`, no sub-packages. Entry point: `SquareGamesApplication`.
+Single Spring Boot module, packaged by feature under `fr.campus.SquareGames`. Entry point: `SquareGamesApplication`, kept at the package root — `@SpringBootApplication`'s default component scan covers every subpackage below it, so no `@ComponentScan` override is needed. Feature packages:
+
+- `heartbeat` — `HeartbeatSensor` / `RandomHeartbeat` / `HeartbeatController`.
+- `catalog` — `GameCatalogController` / `GameInfo` (imports `game.GamePlugin`, the one cross-package reference in the codebase).
+- `game` — everything else: `GameController`, `GameService`/`GameServiceImpl`, the `GamePlugin` extension point (below), the three `GameDao` implementations and JPA entities, `UserClient`, and the game-related exceptions. Not further split — it's one cohesive feature (creating, persisting and playing a game), and splitting it by layer (controller/service/dao) would cut across that without adding clarity.
 
 The codebase follows one consistent pattern per feature: a **domain interface**, one `@Service`/`@Component` implementation, and a `@RestController` that constructor-injects the interface (never the impl). Current vertical slices:
 
-- **Heartbeat** — `HeartbeatSensor` / `RandomHeartbeat` / `HeartbeatController` → `GET /heartbeat` returns an `int`.
-- **Game catalog** — `GameCatalogController` → `GET /games` returns the game catalog (id + localized name) as `List<GameInfo>`.
-- **Game instances** — `GameService` / `GameServiceImpl` / `GameController` → create a game, read its state, list a player's ongoing games, play a move. Two controllers both own `/games` without conflict: `GameCatalogController` maps `GET /games`, `GameController` maps `POST /games`, `GET /games/{gameId}`, `GET /games/mine`, `POST /games/{gameId}/moves` — a new games endpoint must keep using a distinct method/path combo to avoid an ambiguous-mapping startup failure (`/games/mine` coexists with `/games/{gameId}` because Spring MVC prefers an exact literal segment over a path variable at the same position).
+- **Heartbeat** — `GET /heartbeat` returns an `int`.
+- **Game catalog** — `GET /games` returns the game catalog (id + localized name) as `List<GameInfo>`.
+- **Game instances** — create a game, read its state, list a player's ongoing games, play a move. Two controllers both own `/games` without conflict: `GameCatalogController` maps `GET /games`, `GameController` maps `POST /games`, `GET /games/{gameId}`, `GET /games/mine`, `POST /games/{gameId}/moves` — a new games endpoint must keep using a distinct method/path combo to avoid an ambiguous-mapping startup failure (`/games/mine` coexists with `/games/{gameId}` because Spring MVC prefers an exact literal segment over a path variable at the same position).
 
 `POST /games`, `GET /games/mine` and `POST /games/{gameId}/moves` all require an `X-UserId: <UUID>` header (`@RequestHeader`), identifying the calling player — validated against the companion `SquareGameUsers` app via `UserClient` (see below) before any business logic runs. `GET /games/{gameId}` (read a single game) does not require it — not asked for by any business rule so far.
 

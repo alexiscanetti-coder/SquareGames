@@ -1,4 +1,4 @@
-package fr.campus.SquareGames;
+package fr.campus.SquareGames.game;
 
 import fr.le_campus_numerique.square_games.engine.Game;
 import fr.le_campus_numerique.square_games.engine.Token;

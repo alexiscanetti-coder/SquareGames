@@ -1,4 +1,4 @@
-package fr.campus.SquareGames;
+package fr.campus.SquareGames.heartbeat;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
 

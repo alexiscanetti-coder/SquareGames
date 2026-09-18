@@ -1,4 +1,4 @@
-package fr.campus.SquareGames;
+package fr.campus.SquareGames.game;
 
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
