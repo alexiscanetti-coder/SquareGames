@@ -15,7 +15,7 @@ public interface GamePlugin {
 
     String getName(Locale locale);
 
-    Game createGame(GameCreationParams params);
+    Game createGame(GameCreationParams params, UUID creatorId);
 
     Game restoreGame(UUID gameId, int boardSize, List<UUID> players,
                       Collection<TokenPosition<UUID>> boardTokens,

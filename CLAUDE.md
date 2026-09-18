@@ -30,6 +30,8 @@ Add `-o` to run offline once dependencies are cached in `~/.m2`.
 - Spring Boot **4.2.0-SNAPSHOT** (pre-release), pulled from the `spring-snapshots` repository declared in `pom.xml`.
 - `pom.xml` targets Java 21; a newer JDK on the machine also works.
 - Web stack is `spring-boot-starter-webmvc` (servlet MVC, not WebFlux); tests use `spring-boot-starter-webmvc-test`.
+- In this Boot 4 snapshot, `RestClient`/`RestClient.Builder` auto-configuration was extracted out of `spring-boot-starter-webmvc` into its own `spring-boot-starter-restclient` — without it, any `RestClient.Builder` constructor injection fails at startup with `NoSuchBeanDefinitionException`, even though `RestClient.Builder` is present at compile time (it's on the test classpath via `webmvc-test`, so this only breaks the real app, not `@SpringBootTest`).
+- API documented via `springdoc-openapi-starter-webmvc-ui` (Swagger UI at `/swagger-ui/index.html`, OpenAPI JSON at `/v3/api-docs`) — pin an explicit version compatible with this Boot 4 snapshot, Maven Central's "latest" tag can lag.
 
 ## External engine dependency
 
@@ -50,7 +52,9 @@ The codebase follows one consistent pattern per feature: a **domain interface**,
 
 - **Heartbeat** — `HeartbeatSensor` / `RandomHeartbeat` / `HeartbeatController` → `GET /heartbeat` returns an `int`.
 - **Game catalog** — `GameCatalogController` → `GET /games` returns the game catalog (id + localized name) as `List<GameInfo>`.
-- **Game instances** — `GameService` / `GameServiceImpl` / `GameController` → create a game, read its state, play a move. Two controllers both own `/games` without conflict: `GameCatalogController` maps `GET /games`, `GameController` maps `POST /games`, `GET /games/{gameId}`, `POST /games/{gameId}/moves` — a new games endpoint must keep using a distinct method/path combo to avoid an ambiguous-mapping startup failure.
+- **Game instances** — `GameService` / `GameServiceImpl` / `GameController` → create a game, read its state, list a player's ongoing games, play a move. Two controllers both own `/games` without conflict: `GameCatalogController` maps `GET /games`, `GameController` maps `POST /games`, `GET /games/{gameId}`, `GET /games/mine`, `POST /games/{gameId}/moves` — a new games endpoint must keep using a distinct method/path combo to avoid an ambiguous-mapping startup failure (`/games/mine` coexists with `/games/{gameId}` because Spring MVC prefers an exact literal segment over a path variable at the same position).
+
+`POST /games`, `GET /games/mine` and `POST /games/{gameId}/moves` all require an `X-UserId: <UUID>` header (`@RequestHeader`), identifying the calling player — validated against the companion `SquareGameUsers` app via `UserClient` (see below) before any business logic runs. `GET /games/{gameId}` (read a single game) does not require it — not asked for by any business rule so far.
 
 `GameController` and `GameCatalogController` deliberately return engine types (`Game`, `GameInfo` wraps engine data, no game-state DTO) — `Game`/`Token`/`CellPosition` are serialized by Jackson as-is (`Game.getBoard()` keys, a `Map<CellPosition, Token>`, render as the record's `toString()`, e.g. `"CellPosition[x=0, y=0]"`). This was a deliberate step-by-step simplification, not a final design; introducing output DTOs would replace this.
 
@@ -58,8 +62,8 @@ The codebase follows one consistent pattern per feature: a **domain interface**,
 
 `GameServiceImpl` and `GameCatalogController` never touch the engine's `GameFactory` directly — they depend only on `GamePlugin`:
 
-- **`GamePlugin`** (interface) — `getGameFactoryId()` (the id used as `gameType` in the API), `getName(Locale)` (localized label), `createGame(GameCreationParams)` (tolerant creation: falls back to per-game defaults when `playerCount`/`boardSize` are `null`).
-- **`AbstractGamePlugin`** — holds the engine `GameFactory`, the default player count/board size, and a `MessageSource`; implements `getName` (message code `game.name.<id>`, spaces replaced with `_`, e.g. `game.name.15_puzzle`) and the default-filling `createGame`.
+- **`GamePlugin`** (interface) — `getGameFactoryId()` (the id used as `gameType` in the API), `getName(Locale)` (localized label), `createGame(GameCreationParams, UUID creatorId)` (tolerant creation: falls back to per-game defaults when `playerCount`/`boardSize` are `null`; the caller — `X-UserId` — always becomes a player, `opponentIds` when given fill the rest, otherwise random `UUID`s do), `restoreGame(...)` (rebuilds a `Game` from persisted state via the engine's `GameFactory.createGameWithIds`, used by the JDBC/JPA DAOs).
+- **`AbstractGamePlugin`** — holds the engine `GameFactory`, the default player count/board size, and a `MessageSource`; implements `getName` (message code `game.name.<id>`, spaces replaced with `_`, e.g. `game.name.15_puzzle`) and the default-filling `createGame`/`restoreGame`.
 - **`TicTacToePlugin` / `ConnectFourPlugin` / `TaquinPlugin`** — one `@Component` per game type, each a thin subclass whose constructor takes `MessageSource` plus two `@Value`-injected defaults (e.g. `${game.tictactoe.default-player-count}`, `${game.tictactoe.default-board-size}`) and passes its concrete `GameFactory` to `super(...)`.
 - **`GameServiceImpl`** — constructor-injects `List<GamePlugin>` (Spring auto-collects every `@Component` implementing it) and indexes it into a `Map<String, GamePlugin>` keyed by `getGameFactoryId()`. `GameCatalogController` injects the same `List<GamePlugin>` directly.
 
@@ -71,6 +75,8 @@ Business exceptions (not `ResponseStatusException`) carry the HTTP mapping via `
 
 - `GameNotFoundException` → `404` (unknown `gameId`)
 - `InvalidGameOperationException` → `400` (unknown `gameType`, player count/board size out of range, illegal move)
+- `UnknownUserException` → `401` (the `X-UserId` does not correspond to a known user per the companion users app)
+- `ForbiddenMoveException` → `403` (the `X-UserId` calling `POST /games/{gameId}/moves` is not `Game#getCurrentPlayerId()`)
 
 `server.error.include-message=always` in `application.properties` puts the exception message in the JSON error body — dev convenience, keep it in mind if this API is ever exposed publicly.
 
@@ -81,3 +87,11 @@ Business exceptions (not `ResponseStatusException`) carry the HTTP mapping via `
 ## Tests
 
 `SquareGamesApplicationTests` only verifies the Spring context loads (`@SpringBootTest`). Mockito (inline mock maker) is on the test classpath via the webmvc-test starter.
+
+## Companion application: user management
+
+`~/IdeaProjects/SquareGameUsers` is a **separate** Spring Boot application (its own Maven project, not a module of this repo, its own Claude Code session), dedicated to user management. It runs alongside this app on `server.port=8081` (this app: `8080`, set explicitly in `application.properties`).
+
+This app calls it: `UserClient` (`@Component`) wraps a `RestClient` (base URL from `users.service.url` in `application.properties`, injected via `@Value`) and calls `GET /users/{id}/valid` (returns a bare JSON `boolean`, always `200` — no `404` on an unknown id). `GameServiceImpl` calls `UserClient#isValid` at the start of every operation that takes an `X-UserId`, throwing `UnknownUserException` (`401`) when it returns `false`.
+
+`GameDao#findByPlayerId(UUID)` (added alongside this integration, implemented in all three DAOs) backs `GET /games/mine` — `GameServiceImpl` filters its result down to `GameStatus.ONGOING`.

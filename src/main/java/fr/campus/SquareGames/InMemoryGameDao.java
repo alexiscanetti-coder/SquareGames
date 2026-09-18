@@ -21,4 +21,11 @@ public class InMemoryGameDao implements GameDao {
     public Optional<Game> findById(UUID gameId) {
         return Optional.ofNullable(games.get(gameId.toString()));
     }
+
+    @Override
+    public List<Game> findByPlayerId(UUID playerId) {
+        return games.values().stream()
+                .filter(game -> game.getPlayerIds().contains(playerId))
+                .toList();
+    }
 }

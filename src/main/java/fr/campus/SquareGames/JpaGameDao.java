@@ -61,6 +61,15 @@ public class JpaGameDao implements GameDao {
         return repository.findById(gameId.toString()).map(this::toGame);
     }
 
+    @Override
+    public List<Game> findByPlayerId(UUID playerId) {
+        String playerIdString = playerId.toString();
+        return repository.findAll().stream()
+                .filter(entity -> Arrays.asList(entity.playerIds.split(PLAYER_ID_SEPARATOR)).contains(playerIdString))
+                .map(this::toGame)
+                .toList();
+    }
+
     private Game toGame(GameEntity entity) {
         List<UUID> players = Arrays.stream(entity.playerIds.split(PLAYER_ID_SEPARATOR))
                 .map(UUID::fromString)

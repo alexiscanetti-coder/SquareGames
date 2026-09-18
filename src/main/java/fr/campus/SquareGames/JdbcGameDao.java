@@ -105,4 +105,16 @@ public class JdbcGameDao implements GameDao {
         }
         return Optional.of(plugin.restoreGame(gameId, boardSize, players, boardTokens, removedTokens));
     }
+
+    @Override
+    public List<Game> findByPlayerId(UUID playerId) {
+        List<UUID> gameIds = template.query(
+                "SELECT DISTINCT game_id FROM game_players WHERE player_id = :playerId",
+                Map.of("playerId", playerId),
+                (rs, rowNum) -> (UUID) rs.getObject("game_id"));
+        return gameIds.stream()
+                .map(this::findById)
+                .flatMap(Optional::stream)
+                .toList();
+    }
 }
