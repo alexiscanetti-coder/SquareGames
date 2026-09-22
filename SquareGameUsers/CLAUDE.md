@@ -34,16 +34,27 @@ Add `-o` to run offline once dependencies are cached in `~/.m2`.
 
 ## Architecture
 
-Single Spring Boot module, one package `fr.campus.SquareGameUsers`, no sub-packages. Entry point: `SquareGameUsersApplication`.
+Single Spring Boot module, packages organized **by feature**, not by layer: `fr.campus.SquareGameUsers` holds only `SquareGameUsersApplication` (the entry point — `@SpringBootApplication`'s component scan covers every sub-package from there), and each feature gets its own sub-package holding its controller/service/DAO/entity together (currently just `fr.campus.SquareGameUsers.user`; a new feature adds a sibling sub-package, it doesn't reshuffle `user`).
 
-Same layering pattern as the companion game app: a **domain interface**, one `@Service`/`@Component` implementation, and a `@RestController` that constructor-injects the interface (never the impl).
+Within a feature package, same layering pattern as the companion game app: a **domain interface**, one `@Service`/`@Component` implementation, and a `@RestController` that constructor-injects the interface (never the impl).
 
-- **`User`** — the JPA `@Entity` (table `users` — `user` is a reserved word in H2/SQL, hence the explicit `@Table(name = "users")`) and, since there is no separate engine here, also the type returned directly by the API (public fields, Jackson-serialized as-is — the same "no output DTO yet" simplification the game app makes for `Game`/`GameInfo`).
+- **`User`** — the JPA `@Entity` (table `users` — `user` is a reserved word in H2/SQL, hence the explicit `@Table(name = "users")`) and, since there is no separate engine here, also the type returned directly by the API (public fields, Jackson-serialized as-is — the same "no output DTO yet" simplification the game app makes for `Game`/`GameInfo`). Carries a `password` field, `@JsonIgnore`'d so it never serializes into a response; `UserServiceImpl` hashes it with Spring Security's `BCryptPasswordEncoder` before `save`.
 - **`UserRepository`** — plain `JpaRepository<User, UUID>`.
-- **`UserDao`** / **`JpaUserDao`** — thin DAO abstraction over `UserRepository` (`save`, `findById`, `deleteById`, `existsById`), mirroring `GameDao`/`JpaGameDao` in the game app. Only one implementation exists (no in-memory/JDBC variants) since the exercise didn't ask for swappable persistence here.
+- **`UserDao`** / **`JpaUserDao`** — thin DAO abstraction over `UserRepository` (`save`, `findById`, `findByName`, `deleteById`, `existsById`), mirroring `GameDao`/`JpaGameDao` in the game app. Only one implementation exists (no in-memory/JDBC variants) since the exercise didn't ask for swappable persistence here. `findByName` exists solely for `security.UserDetailsServiceImpl` to look users up by login username (there's no separate `username` field — `name` doubles as it).
 - **`UserService`** / **`UserServiceImpl`** — constructor-injects `UserDao`. `createUser` generates the `UUID` server-side (the id is never client-supplied), so it's the source of truth for player ids the game app later validates.
 - **`UserController`** — `POST /users`, `GET /users/{userId}`, `DELETE /users/{userId}`, `GET /users/{userId}/valid`.
 - **`UserNotFoundException`** — `@ResponseStatus(NOT_FOUND)`, thrown by `getUser`/`GET /users/{userId}` only. `GET /users/{userId}/valid` never throws — it always returns a plain `boolean` (`existsById`), because it exists specifically for the game app to *check* a player id without needing 404 handling.
+
+### Security — JWT auth (`fr.campus.SquareGameUsers.security`)
+
+Stateless JWT auth guards everything except login: `SecurityConfig` disables CSRF and sessions, permits `POST /auth/login`, and requires authentication on `anyRequest()` — **including `POST /users`**, so there's no self-service registration endpoint; a user has to already exist (e.g. seeded directly via `UserService`/`UserDao`, not over HTTP) before anyone can log in and start calling the API. `GET /users/{id}/valid`, the endpoint the companion SquareGames app depends on, is likewise behind auth now.
+
+- **`JwtService`** — `io.jsonwebtoken` (`jjwt-api`/`impl`/`jackson`) wrapper: `generateToken(username, roles)`, `extractUsername(token)`, `isTokenValid(token)`. Signing key comes from `jwt.secret` in `application.properties` (a committed dev-only placeholder — a real deployment must inject it via env var instead).
+- **`UserDetailsServiceImpl`** — loads a Spring Security `UserDetails` via `UserDao.findByName`, hard-codes a single `USER` authority (there's no roles column on `User`).
+- **`AuthController`** — `POST /auth/login` takes `LoginRequest(username, password)`, authenticates via `AuthenticationManager`, returns `LoginResponse(token)` on success or a bare `401` on `AuthenticationException`. Returns the status via `ResponseEntity` rather than throwing `ResponseStatusException`/letting Spring Security's `.exceptionHandling()` handle it — a thrown exception triggers Tomcat's `/error` dispatch, which then gets re-evaluated by the *same* security filter chain and gets turned into a `403` before it reaches the client. Keep returning `ResponseEntity` directly for any future auth-adjacent endpoint that needs a specific status code.
+- **`JwtAuthenticationFilter`** — `OncePerRequestFilter` registered before `UsernamePasswordAuthenticationFilter`; reads `Authorization: Bearer <token>`, validates it, and populates `SecurityContextHolder` on success. Silently no-ops (leaves the request unauthenticated) on a missing/invalid header rather than rejecting outright, since `anyRequest().authenticated()` is what actually enforces the 401/403.
+
+`JwtLoginFlowTest` (MockMvc, full Spring context) is the reference test for this flow: bad credentials → 401, protected endpoint without a token → 403, then login → token → same endpoint with `Authorization: Bearer` → 200.
 
 ### Companion application: SquareGames
 

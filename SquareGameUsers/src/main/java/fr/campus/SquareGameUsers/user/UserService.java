@@ -1,4 +1,4 @@
-package fr.campus.SquareGameUsers;
+package fr.campus.SquareGameUsers.user;
 
 import java.util.UUID;
 
