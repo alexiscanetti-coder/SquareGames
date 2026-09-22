@@ -30,7 +30,6 @@ Add `-o` to run offline once dependencies are cached in `~/.m2`.
 - Spring Boot **4.2.0-SNAPSHOT** (pre-release), pulled from the `spring-snapshots` repository declared in `pom.xml`.
 - `pom.xml` targets Java 21; a newer JDK on the machine also works.
 - Web stack is `spring-boot-starter-webmvc` (servlet MVC, not WebFlux); tests use `spring-boot-starter-webmvc-test`.
-- In this Boot 4 snapshot, `RestClient`/`RestClient.Builder` auto-configuration was extracted out of `spring-boot-starter-webmvc` into its own `spring-boot-starter-restclient` — without it, any `RestClient.Builder` constructor injection fails at startup with `NoSuchBeanDefinitionException`, even though `RestClient.Builder` is present at compile time (it's on the test classpath via `webmvc-test`, so this only breaks the real app, not `@SpringBootTest`).
 - API documented via `springdoc-openapi-starter-webmvc-ui` (Swagger UI at `/swagger-ui/index.html`, OpenAPI JSON at `/v3/api-docs`) — pin an explicit version compatible with this Boot 4 snapshot, Maven Central's "latest" tag can lag.
 
 ## External engine dependency
@@ -50,7 +49,8 @@ Single Spring Boot module, packaged by feature under `fr.campus.SquareGames`. En
 
 - `heartbeat` — `HeartbeatSensor` / `RandomHeartbeat` / `HeartbeatController`.
 - `catalog` — `GameCatalogController` / `GameInfo` (imports `game.GamePlugin`, the one cross-package reference in the codebase).
-- `game` — everything else: `GameController`, `GameService`/`GameServiceImpl`, the `GamePlugin` extension point (below), the three `GameDao` implementations and JPA entities, `UserClient`, and the game-related exceptions. Not further split — it's one cohesive feature (creating, persisting and playing a game), and splitting it by layer (controller/service/dao) would cut across that without adding clarity.
+- `game` — everything else: `GameController`, `GameService`/`GameServiceImpl`, the `GamePlugin` extension point (below), the three `GameDao` implementations and JPA entities, and the game-related exceptions. Not further split — it's one cohesive feature (creating, persisting and playing a game), and splitting it by layer (controller/service/dao) would cut across that without adding clarity.
+- `security` — JWT validation, shared with the companion SquareGameUsers app (see below).
 
 The codebase follows one consistent pattern per feature: a **domain interface**, one `@Service`/`@Component` implementation, and a `@RestController` that constructor-injects the interface (never the impl). Current vertical slices:
 
@@ -58,7 +58,7 @@ The codebase follows one consistent pattern per feature: a **domain interface**,
 - **Game catalog** — `GET /games` returns the game catalog (id + localized name) as `List<GameInfo>`.
 - **Game instances** — create a game, read its state, list a player's ongoing games, play a move. Two controllers both own `/games` without conflict: `GameCatalogController` maps `GET /games`, `GameController` maps `POST /games`, `GET /games/{gameId}`, `GET /games/mine`, `POST /games/{gameId}/moves` — a new games endpoint must keep using a distinct method/path combo to avoid an ambiguous-mapping startup failure (`/games/mine` coexists with `/games/{gameId}` because Spring MVC prefers an exact literal segment over a path variable at the same position).
 
-`POST /games`, `GET /games/mine` and `POST /games/{gameId}/moves` all require an `X-UserId: <UUID>` header (`@RequestHeader`), identifying the calling player — validated against the companion `SquareGameUsers` app via `UserClient` (see below) before any business logic runs. `GET /games/{gameId}` (read a single game) does not require it — not asked for by any business rule so far.
+`POST /games`, `GET /games/mine` and `POST /games/{gameId}/moves` identify the calling player from the validated JWT (an `Authentication` controller-method parameter, `UUID.fromString(authentication.getName())`) rather than a client-supplied header — see the Security section below. `GET /games/{gameId}` (read a single game) doesn't use the identity at all, but like every other endpoint it still requires *some* valid `Authorization: Bearer` token, since `SecurityConfig` here has no `permitAll` routes.
 
 `GameController` and `GameCatalogController` deliberately return engine types (`Game`, `GameInfo` wraps engine data, no game-state DTO) — `Game`/`Token`/`CellPosition` are serialized by Jackson as-is (`Game.getBoard()` keys, a `Map<CellPosition, Token>`, render as the record's `toString()`, e.g. `"CellPosition[x=0, y=0]"`). This was a deliberate step-by-step simplification, not a final design; introducing output DTOs would replace this.
 
@@ -79,8 +79,9 @@ Business exceptions (not `ResponseStatusException`) carry the HTTP mapping via `
 
 - `GameNotFoundException` → `404` (unknown `gameId`)
 - `InvalidGameOperationException` → `400` (unknown `gameType`, player count/board size out of range, illegal move)
-- `UnknownUserException` → `401` (the `X-UserId` does not correspond to a known user per the companion users app)
-- `ForbiddenMoveException` → `403` (the `X-UserId` calling `POST /games/{gameId}/moves` is not `Game#getCurrentPlayerId()`)
+- `ForbiddenMoveException` → `403` (the JWT-derived player calling `POST /games/{gameId}/moves` is not `Game#getCurrentPlayerId()`)
+
+There used to be an `UnknownUserException`/`401` here too, thrown when a client-supplied `X-UserId` didn't correspond to a real user (checked via a network call to the companion app). It's gone now that identity comes from a signed JWT: an invalid/expired token is rejected by `SecurityConfig` before the controller ever runs, and a validly-signed token is trusted as referring to a real user by construction (SquareGameUsers only ever signs one for a `User` it just looked up).
 
 `server.error.include-message=always` in `application.properties` puts the exception message in the JSON error body — dev convenience, keep it in mind if this API is ever exposed publicly.
 
@@ -88,14 +89,24 @@ Business exceptions (not `ResponseStatusException`) carry the HTTP mapping via `
 
 `messages.properties` (base = French, the fallback when no matching locale file exists) and `messages_en.properties`, keyed `game.name.<factory id, spaces→_>`. `GameCatalogController#getGames` takes a `Locale` controller-method parameter, resolved by Spring's default `AcceptHeaderLocaleResolver` from the `Accept-Language` header. `spring.messages.fallback-to-system-locale=false` is set so an unmatched language falls back to the base bundle (French) rather than the JVM's system locale.
 
+## Security — JWT validation (`fr.campus.SquareGames.security`)
+
+This app never issues tokens, only validates ones minted by the companion SquareGameUsers app — see the Security section in that app's `CLAUDE.md` for how a token is built (subject = user id, `role` claim).
+
+- **`JwtService`** — a validate-only trim of the Users app's class: `isTokenValid(token)`, `extractUserId(token)`, `extractRole(token)`. Signing key comes from `jwt.secret` in `application.properties`, which **must be byte-for-byte identical** to `jwt.secret` in SquareGameUsers — there is no key-exchange mechanism, just a shared committed dev placeholder (a real deployment injects both from the same secret store).
+- **`JwtAuthenticationFilter`** — same shape as the Users app's filter: reads `Authorization: Bearer <token>`, and on a valid token builds an `Authentication` straight from its claims (principal = `userId.toString()`, authority = the `role` claim) — no call back to SquareGameUsers. This is the whole point of the JWT switch: previously every `X-UserId`-bearing request paid a synchronous network round-trip to `GET /users/{id}/valid`; now a signature check (local, in-process) is what stands in for that trust.
+- **`SecurityConfig`** — stateless sessions, CSRF disabled, `anyRequest().authenticated()` with no `permitAll` routes at all (this app has no login endpoint of its own — tokens only ever come from SquareGameUsers).
+
+`JwtAuthFlowTest` is the reference test: no/garbage token → 403 on a protected endpoint; a token minted in-test with the same secret (mirroring what SquareGameUsers would issue) → `POST /games` succeeds and the created game's player id matches the token's subject.
+
+Note: Spring Boot's `UserDetailsServiceAutoConfiguration` still logs a "Using generated security password" line on every startup — harmless. It fires because this app defines no `UserDetailsService`/`AuthenticationManager` bean of its own (it doesn't need one; `JwtAuthenticationFilter` is the only thing that ever populates `SecurityContextHolder` here), and Boot's default fallback bean creation doesn't know that.
+
 ## Tests
 
 `SquareGamesApplicationTests` only verifies the Spring context loads (`@SpringBootTest`). Mockito (inline mock maker) is on the test classpath via the webmvc-test starter.
 
 ## Companion application: user management
 
-`~/IdeaProjects/SquareGameUsers` is a **separate** Spring Boot application (its own Maven project, not a module of this repo, its own Claude Code session), dedicated to user management. It runs alongside this app on `server.port=8081` (this app: `8080`, set explicitly in `application.properties`).
+`~/IdeaProjects/SquareGameUsers` is a **separate** Spring Boot application (its own Maven project, not a module of this repo, its own Claude Code session), dedicated to user management. It runs alongside this app on `server.port=8081` (this app: `8080`, set explicitly in `application.properties`). It's also where JWTs come from — `POST /auth/login` there is the only place a token is minted; this app only ever validates them (see Security section above).
 
-This app calls it: `UserClient` (`@Component`) wraps a `RestClient` (base URL from `users.service.url` in `application.properties`, injected via `@Value`) and calls `GET /users/{id}/valid` (returns a bare JSON `boolean`, always `200` — no `404` on an unknown id). `GameServiceImpl` calls `UserClient#isValid` at the start of every operation that takes an `X-UserId`, throwing `UnknownUserException` (`401`) when it returns `false`.
-
-`GameDao#findByPlayerId(UUID)` (added alongside this integration, implemented in all three DAOs) backs `GET /games/mine` — `GameServiceImpl` filters its result down to `GameStatus.ONGOING`.
+`GameDao#findByPlayerId(UUID)` (added alongside the original `X-UserId` integration, implemented in all three DAOs) backs `GET /games/mine` — `GameServiceImpl` filters its result down to `GameStatus.ONGOING`.

@@ -18,17 +18,14 @@ public class GameServiceImpl implements GameService {
 
     private final Map<String, GamePlugin> gamePlugins;
     private final GameDao gameDao;
-    private final UserClient userClient;
 
-    public GameServiceImpl(List<GamePlugin> gamePlugins, GameDao gameDao, UserClient userClient) {
+    public GameServiceImpl(List<GamePlugin> gamePlugins, GameDao gameDao) {
         this.gamePlugins = gamePlugins.stream().collect(Collectors.toUnmodifiableMap(GamePlugin::getGameFactoryId, plugin -> plugin));
         this.gameDao = gameDao;
-        this.userClient = userClient;
     }
 
     @Override
     public Game createGame(GameCreationParams params, UUID creatorId) {
-        validateUser(creatorId);
         GamePlugin plugin = gamePlugins.get(params.gameType());
         if (plugin == null) {
             throw new InvalidGameOperationException(
@@ -50,7 +47,6 @@ public class GameServiceImpl implements GameService {
 
     @Override
     public List<Game> listGames(UUID userId) {
-        validateUser(userId);
         return gameDao.findByPlayerId(userId).stream()
                 .filter(game -> game.getStatus() == GameStatus.ONGOING)
                 .toList();
@@ -58,7 +54,6 @@ public class GameServiceImpl implements GameService {
 
     @Override
     public Game move(UUID gameId, CellPosition target, UUID userId) {
-        validateUser(userId);
         Game game = getGame(gameId);
         if (!userId.equals(game.getCurrentPlayerId())) {
             throw new ForbiddenMoveException("Ce n'est pas le tour de " + userId);
@@ -75,11 +70,5 @@ public class GameServiceImpl implements GameService {
             throw new InvalidGameOperationException(e.getMessage());
         }
         return game;
-    }
-
-    private void validateUser(UUID userId) {
-        if (!userClient.isValid(userId)) {
-            throw new UnknownUserException(userId);
-        }
     }
 }
