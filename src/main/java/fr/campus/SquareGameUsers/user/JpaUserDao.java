@@ -1,4 +1,4 @@
-package fr.campus.SquareGameUsers;
+package fr.campus.SquareGameUsers.user;
 
 import org.springframework.stereotype.Repository;
 
@@ -22,6 +22,11 @@ public class JpaUserDao implements UserDao {
     @Override
     public Optional<User> findById(UUID id) {
         return repository.findById(id);
+    }
+
+    @Override
+    public Optional<User> findByName(String name) {
+        return repository.findByName(name);
     }
 
     @Override

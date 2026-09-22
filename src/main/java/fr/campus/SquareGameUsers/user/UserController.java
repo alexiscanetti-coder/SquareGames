@@ -1,4 +1,4 @@
-package fr.campus.SquareGameUsers;
+package fr.campus.SquareGameUsers.user;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.DeleteMapping;
