@@ -2,6 +2,7 @@ package fr.campus.SquareGameUsers.user;
 
 import org.springframework.stereotype.Repository;
 
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -27,6 +28,11 @@ public class JpaUserDao implements UserDao {
     @Override
     public Optional<User> findByName(String name) {
         return repository.findByName(name);
+    }
+
+    @Override
+    public List<User> findAll() {
+        return repository.findAll();
     }
 
     @Override
