@@ -1,4 +1,4 @@
-package fr.campus.SquareGames;
+package fr.campus.SquareGames.catalog;
 
 /**
  * Description d'un jeu du catalogue : identifiant technique + libellé traduit dans la langue demandée.
