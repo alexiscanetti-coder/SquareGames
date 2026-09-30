@@ -1,5 +1,6 @@
 package fr.campus.SquareGameUsers.user;
 
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
@@ -19,12 +20,20 @@ public class UserServiceImpl implements UserService {
 
     @Override
     public User createUser(UserCreationParams params) {
+        if (userDao.findByName(params.name()).isPresent()) {
+            throw new UserAlreadyExistsException(params.name());
+        }
         User user = new User();
         user.id = UUID.randomUUID();
         user.name = params.name();
         user.password = passwordEncoder.encode(params.password());
         user.role = "ROLE_USER";
-        return userDao.save(user);
+        try {
+            return userDao.save(user);
+        } catch (DataIntegrityViolationException e) {
+            // Concurrent registration with the same name: the unique constraint on users.name wins.
+            throw new UserAlreadyExistsException(params.name());
+        }
     }
 
     @Override
