@@ -1,6 +1,5 @@
 package fr.campus.SquareGames.game;
 
-import fr.le_campus_numerique.square_games.engine.CellPosition;
 import fr.le_campus_numerique.square_games.engine.Game;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -49,10 +48,12 @@ public class GameController {
     }
 
     @Operation(summary = "Jouer un coup",
-            description = "Rejeté avec 403 si ce n'est pas le tour du joueur identifié par le JWT.")
+            description = "Rejeté avec 403 si ce n'est pas le tour du joueur identifié par le JWT. "
+                    + "source (position du jeton à déplacer) est facultative, sauf si plusieurs jetons du plateau "
+                    + "peuvent atteindre target (ex. Taquin) : la requête est alors rejetée avec 400.")
     @PostMapping("/games/{gameId}/moves")
-    public Game move(Authentication authentication, @PathVariable UUID gameId, @RequestBody CellPosition target) {
-        return gameService.move(gameId, target, userId(authentication));
+    public Game move(Authentication authentication, @PathVariable UUID gameId, @RequestBody MoveParams params) {
+        return gameService.move(gameId, params, userId(authentication));
     }
 
     private static UUID userId(Authentication authentication) {

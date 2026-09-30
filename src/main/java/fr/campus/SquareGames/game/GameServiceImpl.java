@@ -11,7 +11,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
 @Service
 public class GameServiceImpl implements GameService {
@@ -53,16 +52,18 @@ public class GameServiceImpl implements GameService {
     }
 
     @Override
-    public Game move(UUID gameId, CellPosition target, UUID userId) {
+    public Game move(UUID gameId, MoveParams params, UUID userId) {
+        CellPosition target = params.target();
+        if (target == null) {
+            throw new InvalidGameOperationException("La position cible (target) est obligatoire");
+        }
         Game game = getGame(gameId);
         if (!userId.equals(game.getCurrentPlayerId())) {
             throw new ForbiddenMoveException("Ce n'est pas le tour de " + userId);
         }
-        Token token = Stream.concat(game.getBoard().values().stream(), game.getRemainingTokens().stream())
-                .filter(candidate -> candidate.getAllowedMoves().contains(target))
-                .findFirst()
-                .orElseThrow(() -> new InvalidGameOperationException(
-                        "Aucun jeton ne peut aller en (" + target.x() + ", " + target.y() + ")"));
+        Token token = params.source() != null
+                ? tokenAt(game, params.source(), target)
+                : tokenReaching(game, target);
         try {
             token.moveTo(target);
             gameDao.save(game);
@@ -70,5 +71,38 @@ public class GameServiceImpl implements GameService {
             throw new InvalidGameOperationException(e.getMessage());
         }
         return game;
+    }
+
+    private static Token tokenAt(Game game, CellPosition source, CellPosition target) {
+        Token token = game.getBoard().get(source);
+        if (token == null) {
+            throw new InvalidGameOperationException("Aucun jeton en " + format(source));
+        }
+        if (!token.getAllowedMoves().contains(target)) {
+            throw new InvalidGameOperationException(
+                    "Le jeton en " + format(source) + " ne peut pas aller en " + format(target));
+        }
+        return token;
+    }
+
+    // Tokens already on the board are distinct, so several candidates means the move is ambiguous;
+    // remaining (not yet placed) tokens are interchangeable, so any of them will do.
+    private static Token tokenReaching(Game game, CellPosition target) {
+        List<Token> boardCandidates = game.getBoard().values().stream()
+                .filter(candidate -> candidate.getAllowedMoves().contains(target))
+                .toList();
+        if (boardCandidates.size() > 1) {
+            throw new InvalidGameOperationException("Plusieurs jetons peuvent aller en " + format(target)
+                    + " : précisez la position du jeton à déplacer (source)");
+        }
+        return boardCandidates.stream().findFirst()
+                .or(() -> game.getRemainingTokens().stream()
+                        .filter(candidate -> candidate.getAllowedMoves().contains(target))
+                        .findFirst())
+                .orElseThrow(() -> new InvalidGameOperationException("Aucun jeton ne peut aller en " + format(target)));
+    }
+
+    private static String format(CellPosition position) {
+        return "(" + position.x() + ", " + position.y() + ")";
     }
 }
