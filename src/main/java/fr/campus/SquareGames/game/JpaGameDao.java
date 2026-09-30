@@ -5,9 +5,9 @@ import fr.le_campus_numerique.square_games.engine.Token;
 import fr.le_campus_numerique.square_games.engine.TokenPosition;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -18,8 +18,6 @@ import java.util.stream.Collectors;
 @Profile("jpa")
 public class JpaGameDao implements GameDao {
 
-    private static final String PLAYER_ID_SEPARATOR = ",";
-
     private final GameEntityRepository repository;
     private final Map<String, GamePlugin> gamePlugins;
 
@@ -29,6 +27,7 @@ public class JpaGameDao implements GameDao {
     }
 
     @Override
+    @Transactional
     public void save(Game game) {
         GameEntity entity = new GameEntity();
         entity.id = game.getId().toString();
@@ -36,7 +35,7 @@ public class JpaGameDao implements GameDao {
         entity.boardSize = game.getBoardSize();
         entity.playerIds = game.getPlayerIds().stream()
                 .map(UUID::toString)
-                .collect(Collectors.joining(PLAYER_ID_SEPARATOR));
+                .collect(Collectors.toCollection(ArrayList::new));
 
         List<GameTokenEntity> tokens = new ArrayList<>();
         game.getBoard().forEach((position, token) -> tokens.add(toTokenEntity(token, position.x(), position.y(), false)));
@@ -57,21 +56,21 @@ public class JpaGameDao implements GameDao {
     }
 
     @Override
+    @Transactional(readOnly = true)
     public Optional<Game> findById(UUID gameId) {
         return repository.findById(gameId.toString()).map(this::toGame);
     }
 
     @Override
+    @Transactional(readOnly = true)
     public List<Game> findByPlayerId(UUID playerId) {
-        String playerIdString = playerId.toString();
-        return repository.findAll().stream()
-                .filter(entity -> Arrays.asList(entity.playerIds.split(PLAYER_ID_SEPARATOR)).contains(playerIdString))
+        return repository.findByPlayerId(playerId.toString()).stream()
                 .map(this::toGame)
                 .toList();
     }
 
     private Game toGame(GameEntity entity) {
-        List<UUID> players = Arrays.stream(entity.playerIds.split(PLAYER_ID_SEPARATOR))
+        List<UUID> players = entity.playerIds.stream()
                 .map(UUID::fromString)
                 .toList();
 

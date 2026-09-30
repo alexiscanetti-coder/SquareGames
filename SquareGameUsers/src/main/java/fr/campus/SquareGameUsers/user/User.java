@@ -1,6 +1,7 @@
 package fr.campus.SquareGameUsers.user;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
+import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
@@ -12,6 +13,7 @@ import java.util.UUID;
 public class User {
     @Id
     public UUID id;
+    @Column(unique = true, nullable = false)
     public String name;
     @JsonIgnore
     public String password;

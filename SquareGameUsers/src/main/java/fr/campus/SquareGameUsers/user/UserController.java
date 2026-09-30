@@ -1,5 +1,6 @@
 package fr.campus.SquareGameUsers.user;
 
+import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -24,7 +25,7 @@ public class UserController {
 
     @PostMapping("/users")
     @ResponseStatus(HttpStatus.CREATED)
-    public User createUser(@RequestBody UserCreationParams params) {
+    public User createUser(@Valid @RequestBody UserCreationParams params) {
         return userService.createUser(params);
     }
 

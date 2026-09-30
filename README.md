@@ -20,15 +20,27 @@ docker run --name sg-postgres -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=squar
 ./mvnw spring-boot:run -Dspring-boot.run.arguments=--spring.profiles.active=jpa,postgres
 ```
 
-(le profil `jdbc`, écrit à la main, ne fonctionne qu'avec `postgres` — voir `application-jdbc.properties`)
+(les DAO `jpa`, `jdbc` et `in-memory` sont interchangeables et fonctionnent avec `h2` comme avec `postgres`)
 
-## Application de gestion des utilisateurs
+## Authentification
 
-Les requêtes de jeu (`POST /games`, `GET /games/mine`, `POST /games/{gameId}/moves`) exigent un
-entête `X-UserId` identifiant le joueur, validé auprès de l'application
-[`SquareGameUsers`](../SquareGameUsers), qui doit tourner en parallèle sur `http://localhost:8081`
-(voir son propre `README.md` pour la démarrer). L'URL de ce service est configurable via
-`users.service.url` dans `application.properties`.
+Toutes les requêtes de jeu exigent un JWT dans l'entête `Authorization: Bearer <token>`. Ce token
+est délivré par l'application [`SquareGameUsers`](SquareGameUsers/README.md) (port `8081`) via
+`POST /auth/login`, et validé localement par cette application grâce au secret partagé `jwt.secret`
+(même valeur dans les deux `application.properties`) : aucun appel réseau vers `SquareGameUsers`.
+
+Accessibles sans token : `GET /heartbeat` et la documentation Swagger.
+
+## Jouer un coup
+
+`POST /games/{gameId}/moves` avec un corps `{"source": {"x": 0, "y": 1}, "target": {"x": 1, "y": 1}}` :
+
+- `target` : case d'arrivée (obligatoire) ;
+- `source` : position du jeton à déplacer, facultative au Morpion et au Puissance 4 (le jeton est
+  pris dans la réserve du joueur), mais obligatoire dès que plusieurs jetons du plateau peuvent
+  atteindre `target`, comme au Taquin (sinon : `400`).
+
+Le Taquin se crée avec `"gameType": "15 puzzle"` et uniquement en 4×4.
 
 ## Tests
 

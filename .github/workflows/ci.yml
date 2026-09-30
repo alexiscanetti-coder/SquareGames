@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  square-games:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+          # Le moteur de jeu vient de GitHub Packages, qui exige un token (scope read:packages)
+          server-id: github
+          server-username: GITHUB_ACTOR
+          server-password: ENGINE_PACKAGES_TOKEN
+      - run: ./mvnw -B verify
+        env:
+          ENGINE_PACKAGES_TOKEN: ${{ secrets.ENGINE_PACKAGES_TOKEN }}
+
+  square-game-users:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: SquareGameUsers
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+      - run: ./mvnw -B verify

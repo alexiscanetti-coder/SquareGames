@@ -10,6 +10,7 @@ import org.springframework.stereotype.Service;
 import javax.crypto.SecretKey;
 import java.nio.charset.StandardCharsets;
 import java.util.Date;
+import java.util.Optional;
 import java.util.UUID;
 
 @Service
@@ -34,19 +35,18 @@ public class JwtService {
                 .compact();
     }
 
-    public UUID extractUserId(String token) {
-        return UUID.fromString(parseClaims(token).getSubject());
-    }
-
-    public String extractRole(String token) {
-        return parseClaims(token).get("role", String.class);
-    }
-
-    public boolean isTokenValid(String token) {
+    // Signature, expiration, subject and role are all checked from a single parse of the token.
+    public Optional<JwtPrincipal> authenticate(String token) {
         try {
-            return parseClaims(token).getExpiration().after(new Date());
+            Claims claims = parseClaims(token);
+            String subject = claims.getSubject();
+            String role = claims.get("role", String.class);
+            if (claims.getExpiration() == null || subject == null || role == null || role.isBlank()) {
+                return Optional.empty();
+            }
+            return Optional.of(new JwtPrincipal(UUID.fromString(subject), role));
         } catch (JwtException | IllegalArgumentException e) {
-            return false;
+            return Optional.empty();
         }
     }
 

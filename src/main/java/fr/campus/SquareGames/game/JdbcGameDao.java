@@ -1,6 +1,5 @@
 package fr.campus.SquareGames.game;
 
-import fr.le_campus_numerique.square_games.engine.CellPosition;
 import fr.le_campus_numerique.square_games.engine.Game;
 import fr.le_campus_numerique.square_games.engine.Token;
 import fr.le_campus_numerique.square_games.engine.TokenPosition;
@@ -33,14 +32,16 @@ public class JdbcGameDao implements GameDao {
         UUID gameId = game.getId();
         template.update("DELETE FROM game_tokens WHERE game_id = :gameId", Map.of("gameId", gameId));
         template.update("DELETE FROM game_players WHERE game_id = :gameId", Map.of("gameId", gameId));
-        template.update("""
-                INSERT INTO games (id, factory_id, board_size) VALUES (:id, :factoryId, :boardSize)
-                ON CONFLICT (id) DO UPDATE SET factory_id = EXCLUDED.factory_id, board_size = EXCLUDED.board_size
-                """,
-                new MapSqlParameterSource()
-                        .addValue("id", gameId)
-                        .addValue("factoryId", game.getFactoryId())
-                        .addValue("boardSize", game.getBoardSize()));
+        MapSqlParameterSource gameParams = new MapSqlParameterSource()
+                .addValue("id", gameId)
+                .addValue("factoryId", game.getFactoryId())
+                .addValue("boardSize", game.getBoardSize());
+        // Portable upsert (no Postgres-only ON CONFLICT) so this DAO also runs on H2.
+        int updated = template.update(
+                "UPDATE games SET factory_id = :factoryId, board_size = :boardSize WHERE id = :id", gameParams);
+        if (updated == 0) {
+            template.update("INSERT INTO games (id, factory_id, board_size) VALUES (:id, :factoryId, :boardSize)", gameParams);
+        }
 
         List<UUID> players = List.copyOf(game.getPlayerIds());
         SqlParameterSource[] playerParams = IntStream.range(0, players.size())
@@ -75,35 +76,7 @@ public class JdbcGameDao implements GameDao {
 
     @Override
     public Optional<Game> findById(UUID gameId) {
-        List<Map<String, Object>> gameRows = template.queryForList(
-                "SELECT factory_id, board_size FROM games WHERE id = :gameId", Map.of("gameId", gameId));
-        if (gameRows.isEmpty()) {
-            return Optional.empty();
-        }
-        String factoryId = (String) gameRows.get(0).get("factory_id");
-        int boardSize = (Integer) gameRows.get(0).get("board_size");
-
-        List<UUID> players = template.query(
-                "SELECT player_id FROM game_players WHERE game_id = :gameId ORDER BY player_order",
-                Map.of("gameId", gameId),
-                (rs, rowNum) -> (UUID) rs.getObject("player_id"));
-
-        List<TokenPosition<UUID>> boardTokens = template.query(
-                "SELECT token_name, owner_id, x, y FROM game_tokens WHERE game_id = :gameId AND removed = FALSE",
-                Map.of("gameId", gameId),
-                (rs, rowNum) -> new TokenPosition<>(
-                        (UUID) rs.getObject("owner_id"), rs.getString("token_name"), rs.getInt("x"), rs.getInt("y")));
-
-        List<TokenPosition<UUID>> removedTokens = template.query(
-                "SELECT token_name, owner_id FROM game_tokens WHERE game_id = :gameId AND removed = TRUE",
-                Map.of("gameId", gameId),
-                (rs, rowNum) -> new TokenPosition<>((UUID) rs.getObject("owner_id"), rs.getString("token_name"), 0, 0));
-
-        GamePlugin plugin = gamePlugins.get(factoryId);
-        if (plugin == null) {
-            throw new InvalidGameOperationException("Type de jeu inconnu : " + factoryId);
-        }
-        return Optional.of(plugin.restoreGame(gameId, boardSize, players, boardTokens, removedTokens));
+        return findByIds(List.of(gameId)).stream().findFirst();
     }
 
     @Override
@@ -112,9 +85,57 @@ public class JdbcGameDao implements GameDao {
                 "SELECT DISTINCT game_id FROM game_players WHERE player_id = :playerId",
                 Map.of("playerId", playerId),
                 (rs, rowNum) -> (UUID) rs.getObject("game_id"));
-        return gameIds.stream()
-                .map(this::findById)
-                .flatMap(Optional::stream)
-                .toList();
+        return findByIds(gameIds);
+    }
+
+    // Loads any number of games with a fixed number of queries (one per table), instead of 4 per game.
+    private List<Game> findByIds(Collection<UUID> gameIds) {
+        if (gameIds.isEmpty()) {
+            return List.of();
+        }
+        Map<String, Object> params = Map.of("gameIds", gameIds);
+
+        Map<UUID, List<UUID>> playersByGame = new HashMap<>();
+        template.query(
+                "SELECT game_id, player_id FROM game_players WHERE game_id IN (:gameIds) ORDER BY game_id, player_order",
+                params,
+                rs -> {
+                    playersByGame.computeIfAbsent((UUID) rs.getObject("game_id"), id -> new ArrayList<>())
+                            .add((UUID) rs.getObject("player_id"));
+                });
+
+        Map<UUID, List<TokenPosition<UUID>>> boardTokensByGame = new HashMap<>();
+        Map<UUID, List<TokenPosition<UUID>>> removedTokensByGame = new HashMap<>();
+        template.query(
+                "SELECT game_id, token_name, owner_id, x, y, removed FROM game_tokens WHERE game_id IN (:gameIds)",
+                params,
+                rs -> {
+                    UUID gameId = (UUID) rs.getObject("game_id");
+                    UUID ownerId = (UUID) rs.getObject("owner_id");
+                    String tokenName = rs.getString("token_name");
+                    if (rs.getBoolean("removed")) {
+                        removedTokensByGame.computeIfAbsent(gameId, id -> new ArrayList<>())
+                                .add(new TokenPosition<>(ownerId, tokenName, 0, 0));
+                    } else {
+                        boardTokensByGame.computeIfAbsent(gameId, id -> new ArrayList<>())
+                                .add(new TokenPosition<>(ownerId, tokenName, rs.getInt("x"), rs.getInt("y")));
+                    }
+                });
+
+        return template.query(
+                "SELECT id, factory_id, board_size FROM games WHERE id IN (:gameIds)",
+                params,
+                (rs, rowNum) -> {
+                    UUID gameId = (UUID) rs.getObject("id");
+                    String factoryId = rs.getString("factory_id");
+                    GamePlugin plugin = gamePlugins.get(factoryId);
+                    if (plugin == null) {
+                        throw new InvalidGameOperationException("Type de jeu inconnu : " + factoryId);
+                    }
+                    return plugin.restoreGame(gameId, rs.getInt("board_size"),
+                            playersByGame.getOrDefault(gameId, List.of()),
+                            boardTokensByGame.getOrDefault(gameId, List.of()),
+                            removedTokensByGame.getOrDefault(gameId, List.of()));
+                });
     }
 }
