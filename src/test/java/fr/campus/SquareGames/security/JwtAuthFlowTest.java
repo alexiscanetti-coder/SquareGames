@@ -40,6 +40,21 @@ class JwtAuthFlowTest {
     }
 
     @Test
+    void tokenWithoutRoleIsRejectedInsteadOfCrashing() throws Exception {
+        mockMvc.perform(get("/games/mine").header("Authorization", "Bearer " + tokenFor(UUID.randomUUID(), null)))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void heartbeatAndApiDocsArePublic() throws Exception {
+        mockMvc.perform(get("/heartbeat"))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(get("/v3/api-docs"))
+                .andExpect(status().isOk());
+    }
+
+    @Test
     void validTokenIdentifiesThePlayerCreatingAGame() throws Exception {
         UUID userId = UUID.randomUUID();
         String token = tokenFor(userId, "ROLE_USER");
