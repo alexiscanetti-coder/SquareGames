@@ -104,6 +104,17 @@ class JwtLoginFlowTest {
         login("carol", "s3cret!");
     }
 
+    @Test
+    void registrationRejectsBlankNameOrTooShortPassword() throws Exception {
+        for (UserCreationParams params : new UserCreationParams[]{
+                new UserCreationParams(" ", "s3cret!"),
+                new UserCreationParams("dave", "123")}) {
+            mockMvc.perform(post("/users").contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(params)))
+                    .andExpect(status().isBadRequest());
+        }
+    }
+
     private String login(String username, String password) throws Exception {
         String body = mockMvc.perform(post("/auth/login")
                         .contentType(MediaType.APPLICATION_JSON)

@@ -87,6 +87,22 @@ class GameMoveTest {
     }
 
     @Test
+    void invalidPayloadsAreRejectedWithBadRequest() throws Exception {
+        UUID playerId = UUID.randomUUID();
+        for (String body : new String[]{"{}", "{\"gameType\":\" \"}", "{\"gameType\":\"tictactoe\",\"boardSize\":-1000}"}) {
+            mockMvc.perform(post("/games")
+                            .header("Authorization", "Bearer " + tokenFor(playerId))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(body))
+                    .andExpect(status().isBadRequest());
+        }
+
+        Game game = gameService.createGame(new GameCreationParams("tictactoe", null, null, null), playerId);
+        move(game.getId(), playerId, "{}")
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
     void ticTacToeMoveStillWorksWithoutSource() throws Exception {
         UUID playerId = UUID.randomUUID();
         Game game = gameService.createGame(new GameCreationParams("tictactoe", null, null, null), playerId);
