@@ -111,5 +111,16 @@
 			</plugin>
 		</plugins>
 	</build>
+	<!-- Moteur de jeu publie sur GitHub Packages : les identifiants (serveur "github") sont
+	     dans ~/.m2/settings.xml en local, et fournis par le secret ENGINE_PACKAGES_TOKEN en CI. -->
+	<repositories>
+		<repository>
+			<id>github</id>
+			<url>https://maven.pkg.github.com/le-campus-numerique/*</url>
+			<snapshots>
+				<enabled>true</enabled>
+			</snapshots>
+		</repository>
+	</repositories>
 
 </project>
