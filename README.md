@@ -20,7 +20,7 @@ docker run --name sg-postgres -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=squar
 ./mvnw spring-boot:run -Dspring-boot.run.arguments=--spring.profiles.active=jpa,postgres
 ```
 
-(le profil `jdbc`, écrit à la main, ne fonctionne qu'avec `postgres` — voir `application-jdbc.properties`)
+(les DAO `jpa`, `jdbc` et `in-memory` sont interchangeables et fonctionnent avec `h2` comme avec `postgres`)
 
 ## Application de gestion des utilisateurs
 
